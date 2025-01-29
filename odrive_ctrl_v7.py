@@ -86,9 +86,9 @@ FPS_PRINT_PERIOD = 1/FPS_PRINT_FREQ
 SENSOR_PERIOD = 1/SENSOR_FREQ
 CTRL_PERIOD = 1/CTRL_FREQ
 UDP_PERIOD = 1/UDP_FREQ
-TIME_IN_RL = 10 # seconds, how much time to spend in RL before permitting LQR switch
+TIME_IN_RL = 2 # seconds, how much time to spend in RL before permitting LQR switch
 RL_START_TIME = 0.0
-THETA_LIM_RL2LQR = np.radians(5) # permissible theta limit to switch from RL to LQR
+THETA_LIM_RL2LQR = np.radians(10) # permissible theta limit to switch from RL to LQR
 
 # --- MODULE VARIABLES ---
 running = True
@@ -582,6 +582,14 @@ def main():
 				theta = state_vector[1]
 				x_dot = state_vector[2]
 				theta_dot = state_vector[3]
+
+				theta_in_limits = np.abs(theta % (2*np.pi)) < THETA_LIM_RL2LQR
+				if ((time.time() - RL_START_TIME) > TIME_IN_RL) and theta_in_limits:
+					print("omega: ", theta_dot)
+					omega_in_limits = np.abs(theta_dot) < 0.5
+					if omega_in_limits:
+						print("SWITCHING FROM RL TO LQR CONTROL")
+						ctrl_fsm.state = "LQR"
 
 				# Reformat state_vector for RL
 				theta_adjusted = (theta + np.pi) % (2*np.pi)
