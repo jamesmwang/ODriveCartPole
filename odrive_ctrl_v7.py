@@ -70,7 +70,10 @@ K_THETA_DOT = -24
 LQR_FACTOR = 1.0 # To increase gains
 
 # RL model path
-rl_model_path = "rl_model/params_012825.yaml"
+# rl_model_path = "rl_model/params_012825.yaml" # can swing nicely but not balance
+# rl_model_path = "rl_model/params_nate_sf04.yaml" # can balance but goes off xlimit
+# rl_model_path = "rl_model/params_nate_sf03.yaml" # TERRIBLE... only swings FAST
+rl_model_path = "rl_model/params_012825_1147_KINDA_WORKS.yaml"
 
 # UDP transmission/plotting options
 UDP_FREQ = 30
@@ -83,6 +86,9 @@ FPS_PRINT_PERIOD = 1/FPS_PRINT_FREQ
 SENSOR_PERIOD = 1/SENSOR_FREQ
 CTRL_PERIOD = 1/CTRL_FREQ
 UDP_PERIOD = 1/UDP_FREQ
+TIME_IN_RL = 10 # seconds, how much time to spend in RL before permitting LQR switch
+RL_START_TIME = 0.0
+THETA_LIM_RL2LQR = np.radians(5) # permissible theta limit to switch from RL to LQR
 
 # --- MODULE VARIABLES ---
 running = True
@@ -497,7 +503,9 @@ def main():
 				elif CTRL_MODE == "LQR":
 					ctrl_fsm.switch_state("LQR")
 				elif CTRL_MODE == "RL":
+					RL_START_TIME = time.time() # set RL start time
 					ctrl_fsm.switch_state("RL")
+
 				print(f"Press ctrl+z to exit {CTRL_MODE}...")
 
 			elif ctrl_fsm.state == "SANDBOX":
@@ -635,8 +643,14 @@ def main():
 					cart_pole.zero_cart_pole()
 					print(f"Rail length is: {cart_pole.rail_length}")
 					print("Cart pole zeroed successfully...")
-					ctrl_fsm.switch_state("SET_VERTICAL")
-					print("Move pendulum into vertical position...")
+					# if RL mode, permit starting from theta = 180
+					if CTRL_MODE == "RL":
+						print("On the first attempt - start the cartpole from swing down! GIVE THE PENDULUM A LITTLE PUSH...")
+						ctrl_fsm.switch_state("STANDBY")
+						print("Press ctrl+z to start control...")
+					else:
+						ctrl_fsm.switch_state("SET_VERTICAL")
+						print("Move pendulum into vertical position...")
 
 			elif ctrl_fsm.state == "SET_VERTICAL":
 				zeroed_theta = cart_pole.get_state_vector()[1]
