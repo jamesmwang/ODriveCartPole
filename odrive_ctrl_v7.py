@@ -20,6 +20,12 @@ import socket
 import json
 import signal
 
+import yaml
+import torch
+import torch.nn as nn
+from torchsummary import summary
+from rl_inference import CartPolePolicy
+
 # --- CONSTANTS ---
 # ODrive options
 MAX_POS_DC_CURRENT = 20
@@ -30,7 +36,7 @@ AXIS_TORQUE_SOFT_MAX = 2 # Set to low value for testing
 AXIS_VEL_LIMIT = 20
 
 # Program options
-CTRL_MODE = "LQR"
+CTRL_MODE = "RL"
 THETA_LIM = np.radians(20) # Input in degrees
 # THETA_LIM = np.inf # For swing up mode
 X_LIM = 0.35
@@ -62,6 +68,9 @@ K_X_DOT = -20
 K_THETA = -97
 K_THETA_DOT = -24
 LQR_FACTOR = 1.0 # To increase gains
+
+# RL model path
+rl_model_path = "rl_model/params_012825.yaml"
 
 # UDP transmission/plotting options
 UDP_FREQ = 30
@@ -391,8 +400,17 @@ def main():
 	k_mat = np.array([K_X, K_X_DOT, K_THETA, K_THETA_DOT])*LQR_FACTOR
 	lqr = LQRController(k_mat)
 
+	# Initialize RL control model
+	if CTRL_MODE == "RL":
+		print("Loading RL model...")
+		cart_pole_policy = CartPolePolicy(rl_model_path)
+		summary(cart_pole_policy.model_pytorch, input_size=(4,))
+
 	# Runtime assurance instance
-	runtime_assurance = RuntimeAssurance(force_lim=FORCE_LIM, x_lim=X_LIM, theta_lim=THETA_LIM)
+	if CTRL_MODE == "RL":
+		runtime_assurance = RuntimeAssurance(force_lim=FORCE_LIM, x_lim=X_LIM, theta_lim=np.inf)
+	else:
+		runtime_assurance = RuntimeAssurance(force_lim=FORCE_LIM, x_lim=X_LIM, theta_lim=THETA_LIM)
 
 	# Timing and FPS counting
 	main_fps_monitor = FPSMonitor()
@@ -418,7 +436,19 @@ def main():
 	plot_state_vector = [0]*N_TRACES
 
 	# Initialize control FSM
-	ctrl_fsm = FSM("ctrl", ["STANDBY", "CART_LIM_1", "CART_LIM_2", "DETECT_NEUTRAL", "ZERO_PENDULUM", "SET_VERTICAL", "MOTOR_ON", "SANDBOX", "PID", "LQR", "RESET"])
+	ctrl_fsm = FSM("ctrl", ["STANDBY",
+							"CART_LIM_1",
+							"CART_LIM_2",
+							"DETECT_NEUTRAL",
+							"ZERO_PENDULUM",
+							"SET_VERTICAL",
+							"MOTOR_ON",
+							"SANDBOX",
+							"PID",
+							"LQR",
+							"RL",
+							"RESET"])
+
 	ctrl_fsm.switch_state("STANDBY")
 	print("Press ctrl+z to start zeroing process...")
 
@@ -466,6 +496,8 @@ def main():
 					ctrl_fsm.switch_state("PID")
 				elif CTRL_MODE == "LQR":
 					ctrl_fsm.switch_state("LQR")
+				elif CTRL_MODE == "RL":
+					ctrl_fsm.switch_state("RL")
 				print(f"Press ctrl+z to exit {CTRL_MODE}...")
 
 			elif ctrl_fsm.state == "SANDBOX":
@@ -517,6 +549,41 @@ def main():
 
 				# Calculate control force
 				ctrl_force = lqr.get_ctrl(lqr_state_vector)
+
+				# Runtime assurance
+				if runtime_assurance.check(ctrl_force, state_vector):
+					# Calculate motor torque
+					pulley_rad = cart_pole.r_pulley
+					ctrl_torque = force_to_torque(ctrl_force, pulley_rad)
+					odrv.axis0.controller.input_torque = ctrl_torque
+				else:
+					odrv.axis0.requested_state = AXIS_STATE_IDLE
+					ctrl_fsm.switch_state("RESET")
+					print("Press ctrl+z to reset cart-pole...")
+
+				if ctrl_z_flag:
+					ctrl_z_flag = False
+					odrv.axis0.requested_state = AXIS_STATE_IDLE
+					ctrl_fsm.switch_state("RESET")
+					print("Press ctrl+z to reset cart-pole...")
+
+			elif ctrl_fsm.state == "RL":
+				# Get current state
+				state_vector = cart_pole.get_state_vector()
+				x = state_vector[0]
+				theta = state_vector[1]
+				x_dot = state_vector[2]
+				theta_dot = state_vector[3]
+
+				# Reformat state_vector for RL
+				theta_adjusted = (theta + np.pi) % (2*np.pi)
+				if theta_adjusted > np.pi:
+					theta_adjusted -= 2 * np.pi
+					
+				rl_state_vector = torch.tensor([x, theta_adjusted, x_dot, theta_dot], dtype=torch.float32)
+
+				# Calculate control force
+				ctrl_force = cart_pole_policy.inference(rl_state_vector)
 
 				# Runtime assurance
 				if runtime_assurance.check(ctrl_force, state_vector):
