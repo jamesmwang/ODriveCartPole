@@ -39,7 +39,7 @@ AXIS_VEL_LIMIT = 20
 CTRL_MODE = "RL"
 THETA_LIM = np.radians(20) # Input in degrees
 # THETA_LIM = np.inf # For swing up mode
-X_LIM = 0.35
+X_LIM = 0.4
 FORCE_LIM = 30
 BUILT_IN_MOTOR_ENCODER = True
 PRINT_FPS = False
@@ -70,7 +70,7 @@ K_THETA_DOT = -24
 LQR_FACTOR = 1.0 # To increase gains
 
 # RL model path
-rl_model_path = "rl_model/params_012825.yaml"
+rl_model_path = "rl_model/params_012925.yaml"
 
 # UDP transmission/plotting options
 UDP_FREQ = 30
