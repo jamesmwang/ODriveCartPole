@@ -36,6 +36,8 @@ AXIS_TORQUE_SOFT_MAX = 2 # Set to low value for testing
 AXIS_VEL_LIMIT = 20
 
 # Program options
+# CTRL_MODE = "PID"
+# CTRL_MODE = "LQR"
 CTRL_MODE = "RL"
 THETA_LIM = np.radians(20) # Input in degrees
 # THETA_LIM = np.inf # For swing up mode
@@ -49,12 +51,12 @@ CTRL_FREQ = 50
 VEL_ALPHA = 0.1
 
 # PID gains (all neg)
-KP = -150
-KI = -1
-KD = -0.4
-# KP = -200
-# KI = -0
-# KD = -20
+# KP = -150
+# KI = -1
+# KD = -0.4
+KP = -100
+KI = -0
+KD = -10
 
 # LQR gains
 # K_X = -22.36067977
@@ -70,7 +72,7 @@ K_THETA_DOT = -24
 LQR_FACTOR = 1.0 # To increase gains
 
 # RL model path
-rl_model_path = "rl_model/params_012925.yaml"
+rl_model_path = "rl_model/params_012925_working_checkpoint.yaml"
 
 # UDP transmission/plotting options
 UDP_FREQ = 30
@@ -95,7 +97,7 @@ def sigint_handler(sig, frame):
 	running = False
 	print("\nctrl+c detected, exiting main loop...")
 
-def sigstp_handler(sig, frame):
+def sigstp_handler(signum, frame):
 	global ctrl_z_flag
 	ctrl_z_flag = True
 
