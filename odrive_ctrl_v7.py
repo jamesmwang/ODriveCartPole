@@ -649,8 +649,8 @@ def main():
 			elif ctrl_fsm.state == "RESET":
 				if ctrl_z_flag:
 					ctrl_z_flag = False
-					ctrl_fsm.switch_state("SET_VERTICAL")
-					print("Move pendulum into vertical position...")
+					ctrl_fsm.switch_state("ZERO_PENDULUM")
+					print("Press ctrl+z to zero pendulum...")
 
 			# --- END ---
 
