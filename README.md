@@ -1,7 +1,7 @@
 # ODriveCartPole
 ![CartPoleDemo](images/cartpole_demo.gif)
 
-ODrive cart pole repo for inverted pendulum lab
+ODrive cart pole repo for inverted pendulum lab. View associated slides/Colab links here: https://tinyurl.com/yrhwf7e7
 
 ## Robot Build Documentation
 ![CartPoleImg](images/cartpole_screenshot.png)
