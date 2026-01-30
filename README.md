@@ -19,12 +19,12 @@ There is no complete documenation available for the robot build, but .STEP files
 - Encoder cable - 2m (https://shop.odriverobotics.com/products/cable-for-16384-cpr-absolute-rs485-encoder-for-odrive-s1?variant=40926828953670)
 - USB cord and isolator (https://shop.odriverobotics.com/products/usb-c-to-usb-a-cable-and-usb-isolator)
 
-## Tune a Linear PID Controller
+## Tune a PID/LQR Controller
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](
 https://colab.research.google.com/github/jamesmwang/ODriveCartPole/blob/main/notebooks/tune_pid.ipynb
 )
 
-The link above can be used to access a Google Colaboratory notebook where you can tune PID gains on an accurate nonlinear dynamics model of the cartpole robot.
+The link above can be used to access a Google Colaboratory notebook where you can tune PID/LQR gains on an accurate nonlinear dynamics model of the cartpole robot.
 
 ## Train a Reinforcement Learning Policy
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](
