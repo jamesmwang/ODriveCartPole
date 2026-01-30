@@ -109,7 +109,8 @@ class CartPolePolicy:
             return output
 
 def main():
-    model_path = "rl_model/params_012825.yaml"
+    # model_path = "rl_model/params_012925_working_checkpoint.yaml"
+    model_path = "rl_model/params_012126.yaml"
 
     print("Loading and converting model...")
     cart_pole_policy = CartPolePolicy(model_path)
@@ -119,7 +120,7 @@ def main():
 
     print("Running test inference...")
     timestamp = time.time()
-    test_tensor = torch.tensor([0.024, 0.608, 1.552, 6.571], dtype=torch.float32)
+    test_tensor = torch.tensor([0.0, 0.0, 0.0, 0.0], dtype=torch.float32)
     test_inference = cart_pole_policy.inference(test_tensor)
     inference_time = int((time.time() - timestamp) * 1000)
     print(f"Test tensor:")

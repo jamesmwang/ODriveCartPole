@@ -51,24 +51,18 @@ CTRL_FREQ = 50
 VEL_ALPHA = 0.1
 
 # PID gains (all neg)
-# KP = -150
-# KI = -1
-# KD = -0.4
-KP = -100
-KI = -0
-KD = -10
+KP = -250
+KI = -100
+KD = -1.0
+# KP = -100
+# KI = -0
+# KD = -10
 
 # LQR gains
-# K_X = -22.36067977
-# K_X_DOT = -21.52266472
-# K_THETA = -83.79167852
-# K_THETA_DOT = -15.36174827
-# LQR_FACTOR = 1.0 # To increase gains
-
-K_X = -17
-K_X_DOT = -20
-K_THETA = -97
-K_THETA_DOT = -24
+K_X = -44.72
+K_X_DOT = -32.73
+K_THETA = -116.63
+K_THETA_DOT = -22.25
 LQR_FACTOR = 1.0 # To increase gains
 
 # RL model path
