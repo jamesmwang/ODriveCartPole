@@ -1,8 +1,15 @@
 torch==2.2.2
 torchsummary==1.5.1
 numpy==1.26.3
+pandas==2.3.3
 PyYAML==6.0
 pyqtgraph==0.13.7
 PyQt6==6.6.1
+# The Qt runtime and sip must be pinned alongside PyQt6. Left unpinned, pip
+# installs the newest Qt6 against bindings built for 6.6.x and QtCore fails to
+# load with a missing symbol
+PyQt6-Qt6==6.6.1
+PyQt6-sip==13.10.2
+odrive==0.6.11.post0
 pyusb==1.3.1
 pyserial==3.5

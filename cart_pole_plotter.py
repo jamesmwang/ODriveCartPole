@@ -1,6 +1,7 @@
 # --- IMPORTS ---
 import socket
 import json
+import math
 import threading
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
@@ -12,7 +13,6 @@ import time
 # Options
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
-LEGEND = ["x", "theta", "x_dot", "theta_dot"]
 PLOT_FREQ = 30
 PLOT_WIN_SEC = 3
 
@@ -81,12 +81,14 @@ def update_plots():
         if new_data_flag:
             new_data_flag = False
             # Update data deques
+            # Each signal has its own plot, so display units are chosen for
+            # readability rather than to make them share an axis
             elapsed_time = new_timestamp - START_TIME
             time_vect.append(elapsed_time)
-            x_vect.append(new_state[0]*100) # Convert to cm
-            theta_vect.append(new_state[1])
-            x_dot_vect.append(new_state[2]*100) # Convert to cm/s
-            theta_dot_vect.append(new_state[3])
+            x_vect.append(new_state[0]*100) # m -> cm
+            theta_vect.append(math.degrees(new_state[1])) # rad -> deg
+            x_dot_vect.append(new_state[2]*100) # m/s -> cm/s
+            theta_dot_vect.append(math.degrees(new_state[3])) # rad/s -> deg/s
             ctrl_force_vect.append(new_ctrl_force)
 
             # Set data for plotting
@@ -111,28 +113,39 @@ def main():
     # Initialize pyqtgraph object and window
     app = pg.mkQApp("Real-Time Plotting")
     win = pg.GraphicsLayoutWidget(show=True, title="Real-Time Plotting")
-    win.resize(1000, 600)
+    win.resize(1100, 760)
 
-    # Create plots
-    plot1 = win.addPlot(title="Position Data")
-    plot1.addLegend()
-    with lock:
-        x_curve = plot1.plot(pen='b', name="x (cm)")
-        theta_curve = plot1.plot(pen='r', name="theta (rad)")
+    # One signal per plot. Sharing an axis between a cart position in the tens
+    # and a pole angle in the tenths flattened the angle into a straight line,
+    # so each signal now gets its own y scale
+    plot_defs = [
+        ("theta",     0, 0, 1, "Pole angle",     "θ [deg]",       'r'),
+        ("x",         0, 1, 1, "Cart position",  "x [cm]",             'b'),
+        ("theta_dot", 1, 0, 1, "Pole rate",      "θ̇ [deg/s]", 'r'),
+        ("x_dot",     1, 1, 1, "Cart velocity",  "ẋ [cm/s]",      'b'),
+        ("force",     2, 0, 2, "Control force",  "F [N]",              'y'),
+    ]
 
-    win.nextRow()
-    plot2 = win.addPlot(title="Velocity Data")
-    plot2.addLegend()
+    # Note the time axes are left to auto-range rather than being linked with
+    # setXLink. Every plot draws the same time vector so they line up anyway,
+    # and linking views of unequal width matches pixels per unit instead of
+    # range, which stretched the double-width force plot to twice the span
+    curves = {}
     with lock:
-        x_dot_curve = plot2.plot(pen='b', name="x dot (cm/s)")
-        theta_dot_curve = plot2.plot(pen='r', name="theta dot (rad/s)")
+        for key, row, col, colspan, title, ylabel, pen in plot_defs:
+            plot = win.addPlot(row=row, col=col, colspan=colspan, title=title)
+            plot.showGrid(x=True, y=True, alpha=0.15)
+            plot.setLabel("left", ylabel)
+            plot.setLabel("bottom", "time [s]")
+            curves[key] = plot.plot(pen=pg.mkPen(pen, width=2))
 
-    win.nextRow()
-    plot3 = win.addPlot(title="Control Force")
-    plot3.addLegend()
-    with lock:
-        ctrl_force_curve = plot3.plot(pen='r', name="ctrl force (N)")
-        
+        theta_curve = curves["theta"]
+        x_curve = curves["x"]
+        theta_dot_curve = curves["theta_dot"]
+        x_dot_curve = curves["x_dot"]
+        ctrl_force_curve = curves["force"]
+
+
     # Update plots
     plot_timer = QtCore.QTimer()
 
@@ -141,7 +154,8 @@ def main():
     plot_timer.start(int(PLOT_PERIOD * 1000))
 
     # Executing plotting app hangs main thread
-    app.exec_()
+    # Note pg.exec() works across Qt bindings, PyQt6 dropped app.exec_()
+    pg.exec()
 
 if __name__ == "__main__":
     main()
