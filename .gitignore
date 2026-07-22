@@ -16,3 +16,7 @@ Thumbs.db
 
 # Ignore archive files
 archive/
+
+# Ignore recorded rollouts, but keep the directory itself
+rollout_data/*
+!rollout_data/.gitkeep
