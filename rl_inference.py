@@ -17,14 +17,21 @@ class CartPolePolicy:
 
 
     def load_model(self, model_path: str):
+        # The libyaml-backed loader parses these weight dumps roughly an order
+        # of magnitude faster than the pure python one, which matters when
+        # swapping models from the config console. Fall back if unavailable
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
         try:
             with open(model_path, "r") as file:
-                model_data = yaml.safe_load(file)
+                model_data = yaml.load(file, Loader=loader)
             print(f"Model loaded from {model_path}")
         except FileNotFoundError:
             print(f"Error: File not found at {model_path}")
+            raise
         except yaml.YAMLError as e:
             print(f"Error parsing YAML file: {e}")
+            raise
 
         return model_data
 
