@@ -16,6 +16,7 @@ import numpy as np
 from collections import deque
 import odrive
 from odrive.enums import *
+import os
 import socket
 import json
 import signal
@@ -62,6 +63,10 @@ K_THETA_DOT = -22.25
 
 # RL model path
 rl_model_path = "rl_model/params_012925_working_checkpoint.yaml"
+
+# Rollout logging options
+ROLLOUT_SECS = 10 # Seconds of state and action logged after each arm, 0 is off
+ROLLOUT_DIR = "rollout_data"
 
 # UDP transmission/plotting options
 UDP_FREQ = 30
@@ -273,6 +278,80 @@ class LQRController:
 		output = -np.dot(state_vector, k_mat_mod)
 		return output
 
+class RolloutRecorder:
+	# Buffers state and action in memory while control is active, then writes a
+	# csv on demand from the config console. Appending a tuple costs well under
+	# a microsecond against a 20 ms control period, and nothing touches the disk
+	# until the motor is already idle
+	def __init__(self, duration=ROLLOUT_SECS):
+		self.duration = duration
+		self.rows = []
+		self.capacity = 0
+		self.start_timestamp = None
+		self.mode = None
+		self.saved = True
+
+	def start(self, config):
+		# Called on each arm. Any unsaved rows from the previous run are dropped
+		self.rows = []
+		self.capacity = int(np.ceil(self.duration*CTRL_FREQ))
+		self.start_timestamp = time.time()
+		self.mode = config.mode
+		self.saved = True
+
+	def record(self, timestamp, state_vector, ctrl_force):
+		# Hot path, called once per control cycle. Kept to a length check and a
+		# tuple append. A duration of 0 leaves capacity at 0 and records nothing
+		if len(self.rows) < self.capacity:
+			self.rows.append((timestamp - self.start_timestamp,
+							state_vector[0], state_vector[1],
+							state_vector[2], state_vector[3],
+							ctrl_force))
+			self.saved = False
+
+	def status(self):
+		if self.duration <= 0:
+			return "off"
+
+		status = f"{self.duration:g}s"
+		if self.rows:
+			full = " (buffer full)" if len(self.rows) >= self.capacity else ""
+			saved = "saved" if self.saved else "unsaved"
+			status += f", {len(self.rows)} samples {saved}{full}"
+		return status
+
+	def save(self, name=""):
+		if not self.rows:
+			print("ERROR: no rollout data to save...")
+			return None
+
+		filename = self.build_filename(name)
+		path = os.path.join(ROLLOUT_DIR, filename)
+
+		try:
+			os.makedirs(ROLLOUT_DIR, exist_ok=True)
+			with open(path, "w") as file:
+				# t is measured from the arm, theta from vertical
+				file.write("t[s],x[m],theta[rad],x_dot[m/s],theta_dot[rad/s],force[N]\n")
+				for row in self.rows:
+					file.write(",".join(f"{value:.6f}" for value in row) + "\n")
+		except OSError as e:
+			print(f"ERROR: could not write '{path}': {e}")
+			return None
+
+		self.saved = True
+		return path
+
+	def build_filename(self, name):
+		# Strip any directory component so that a stray path cannot write
+		# outside of the rollout directory
+		name = os.path.basename(name.strip()).strip(". ")
+		if not name:
+			name = f"{self.mode}_{time.strftime('%Y%m%d_%H%M%S')}"
+		if not name.lower().endswith(".csv"):
+			name += ".csv"
+		return name
+
 class RuntimeConfig:
 	# Holds everything that can be changed without restarting the program, so
 	# that the cart-pole only has to be zeroed once per session. The module
@@ -295,6 +374,9 @@ class RuntimeConfig:
 		# RL model
 		self.model_path = rl_model_path
 		self.policy = None
+
+		# Rollout logging
+		self.rollout = RolloutRecorder()
 
 	def build_pid(self):
 		# Rebuilt on every arm, which also clears accumulated integral windup
@@ -325,6 +407,7 @@ class RuntimeConfig:
 			f"  pid    kp={self.kp} ki={self.ki} kd={self.kd}",
 			f"  lqr    k_x={self.k_x} k_x_dot={self.k_x_dot} k_theta={self.k_theta} k_theta_dot={self.k_theta_dot}",
 			f"  model  {self.model_path}{model_note}",
+			f"  record {self.rollout.status()}",
 		])
 
 # Console command name -> RuntimeConfig attribute name
@@ -343,6 +426,8 @@ CONFIG_HELP = """  show                 print current configuration
   kp|ki|kd <value>     set PID gain
   kx|kxd|kth|kthd <v>  set LQR gain (x, x_dot, theta, theta_dot)
   model <path>         load an RL model from a params yaml
+  record <seconds>     seconds logged after each arm, 0 to disable
+  save [name]          write the last rollout to a csv, prompts for a name
   go                   resume, then raise the pendulum to re-arm
   rezero               re-zero the pendulum while dangling
   quit                 exit the program"""
@@ -426,6 +511,38 @@ def config_console_loop(config):
 
 			if config.load_policy(cmd_args[0]):
 				print(f"model = {config.model_path}")
+
+		elif cmd == "record":
+			if not cmd_args:
+				print("Usage: record <seconds>")
+				continue
+
+			try:
+				seconds = float(cmd_args[0])
+			except ValueError:
+				print(f"ERROR: '{cmd_args[0]}' is not a number...")
+				continue
+
+			if seconds < 0:
+				print("ERROR: recording duration cannot be negative...")
+				continue
+
+			config.rollout.duration = seconds
+			print(f"record = {config.rollout.status()}")
+
+		elif cmd == "save":
+			if config.rollout.duration <= 0:
+				print("ERROR: recording is disabled, enable it with 'record <seconds>'...")
+				continue
+
+			# Name can come from the command itself, otherwise prompt for one
+			name = " ".join(cmd_args)
+			if not name:
+				name = input("Rollout name (enter for default): ").strip()
+
+			path = config.rollout.save(name)
+			if path is not None:
+				print(f"Saved {len(config.rollout.rows)} samples to {path}...")
 
 		elif cmd in GAIN_COMMANDS:
 			if not cmd_args:
@@ -685,6 +802,9 @@ def main():
 				# controllers are only valid near vertical
 				runtime_assurance.theta_lim = np.inf if config.mode == "RL" else THETA_LIM
 
+				# Begin a fresh rollout, discarding any unsaved previous one
+				config.rollout.start(config)
+
 				odrv.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
 				ctrl_fsm.switch_state(config.mode)
 				print(f"Press ctrl+z to pause {config.mode}...")
@@ -833,6 +953,9 @@ def main():
 					pulley_rad = cart_pole.r_pulley
 					ctrl_torque = force_to_torque(ctrl_force, pulley_rad)
 					odrv.axis0.controller.input_torque = ctrl_torque
+
+					# Log the state alongside the action actually applied to it
+					config.rollout.record(cart_pole.state_timestamp, state_vector, ctrl_force)
 
 			ctrl_timestamp = time.time()
 
