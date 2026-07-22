@@ -1,0 +1,1348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cart-Pole PID Tuning</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:         #f9f9f7;
+    --surface:      #fcfcfb;
+    --ink:          #0b0b0b;
+    --ink-2:        #52514e;
+    --muted:        #898781;
+    --grid:         #e1e0d9;
+    --axis:         #c3c2b7;
+    --border:       rgba(11,11,11,0.10);
+    --series-1:     #2a78d6;   /* primary data series (blue) */
+    --series-2:     #008300;   /* second categorical slot (green) */
+    --status-good:  #0ca30c;
+    --status-crit:  #d03b3b;
+    --band:         #f0efec;
+    --pole:         #e34948;   /* pendulum color in the animation */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14.5px;
+    line-height: 1.45;
+  }
+  .page { max-width: 1060px; margin: 0 auto; padding: 22px 18px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: var(--ink-2); margin: 0 0 14px; max-width: 78ch; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .cards3 { display: grid; grid-template-columns: 1fr 1.15fr 1.25fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 860px) { .cards3 { grid-template-columns: 1fr; } }
+  .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; flex-wrap: wrap; }
+  .row label { min-width: 118px; color: var(--ink-2); }
+  input[type="number"] {
+    width: 82px; padding: 4px 6px; border: 1px solid var(--axis); border-radius: 6px;
+    font: inherit; font-variant-numeric: tabular-nums; background: #fff; color: var(--ink);
+  }
+  input[type="text"], input[type="password"] {
+    padding: 4px 8px; border: 1px solid var(--axis); border-radius: 6px; font: inherit;
+    background: #fff; color: var(--ink);
+  }
+  input[type="range"] { accent-color: var(--series-1); flex: 1; min-width: 120px; }
+  input[type="checkbox"] { accent-color: var(--series-1); width: 15px; height: 15px; }
+  button {
+    font: inherit; padding: 5px 14px; border-radius: 7px; border: 1px solid var(--axis);
+    background: #fff; color: var(--ink); cursor: pointer;
+  }
+  button:hover { background: #f2f1ee; }
+  button.primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+  button.primary:hover { filter: brightness(1.06); }
+  .actionrow {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    margin: 0 0 14px;
+  }
+  .actionrow .primary { padding: 8px 26px; }
+  .dirty { color: var(--ink-2); font-size: 13px; }
+  .si { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 2px 0 0; }
+  .gainrow { display: grid; grid-template-columns: 34px 1fr 78px; gap: 10px; align-items: center; margin: 10px 0 2px; }
+  .gainrow .gname { font-weight: 600; }
+  .robot { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; margin: 0 0 6px 44px; }
+  .lockbox { border-top: 1px dashed var(--grid); margin-top: 12px; padding-top: 10px; }
+  .lockbox .err { color: var(--status-crit); font-size: 13px; margin: 4px 0 0; display: none; }
+  .locked-only { display: none; border-top: 1px dashed var(--grid); margin-top: 12px; padding-top: 6px; }
+  body.unlocked .locked-only { display: block; }
+  body.unlocked .lockbox { display: none; }
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 720px) { .tiles { grid-template-columns: 1fr; } }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+  .tile .tl { color: var(--ink-2); font-size: 13px; }
+  .tile .tv { font-size: 26px; font-weight: 650; margin: 2px 0; }
+  .tile .tn { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .tv.good { color: var(--status-good); }
+  .tv.crit { color: var(--status-crit); }
+  .statusmsg { color: var(--status-crit); font-size: 13px; min-height: 1em; margin: -6px 0 10px; }
+  canvas { display: block; }
+  .animbar { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+  .animbar input[type="range"] { flex: 1; }
+  .tlabel { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 70px; text-align: right; }
+  .plots-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .plots-grid { grid-template-columns: 1fr; } }
+  .pw { position: relative; }
+  .pw canvas { width: 100%; height: 190px; }
+  .pw .ch { position: absolute; top: 0; width: 1px; background: var(--axis); pointer-events: none; display: none; }
+  .pw .tip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: #fff; border: 1px solid var(--border); border-radius: 7px;
+    padding: 5px 9px; font-size: 12.5px; font-variant-numeric: tabular-nums;
+    color: var(--ink-2); white-space: pre; box-shadow: 0 2px 8px rgba(11,11,11,0.08);
+  }
+  .fnote {
+    background: var(--band); border-radius: 8px; padding: 6px 10px; font-size: 11.5px;
+    color: var(--ink-2); justify-self: start; align-self: start;
+  }
+  .legend { display: flex; gap: 12px; }
+  .legend .li { display: flex; align-items: center; gap: 6px; }
+  .chip { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+  .classical-row { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-top: 10px; }
+  @media (max-width: 860px) { .classical-row { grid-template-columns: 1fr; } }
+  .classical-row canvas, .bode canvas { width: 100%; }
+  #classicalBody.stale { opacity: 0.45; }
+  .stalebadge { display: none; color: var(--muted); font-size: 12.5px; margin-left: 10px; }
+  .stalebadge.on { display: inline; }
+  .verdict { font-size: 13.5px; margin: 10px 0 0; font-variant-numeric: tabular-nums; }
+  .clnote { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; max-width: 90ch; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--ink-2); }
+  .twrap { max-height: 300px; overflow: auto; margin-top: 8px; border: 1px solid var(--grid); border-radius: 7px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 3px 10px; text-align: right; border-bottom: 1px solid var(--grid); }
+  th { position: sticky; top: 0; background: var(--band); color: var(--ink-2); font-weight: 600; }
+  footer { color: var(--muted); font-size: 12.5px; margin-top: 18px; max-width: 90ch; }
+  .mono { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>Cart-Pole PID Tuning</h1>
+    <p class="sub">
+      The pendulum starts tilted away from vertical. Your PID controller pushes the cart back and
+      forth to bring the pole upright (&theta; = 0) and keep it there. <b>Goal: tune the gains for the
+      fastest settling time</b> — the time after which |&theta;| stays inside a &plusmn;5% band of the initial
+      tilt (reported below). Tips: raise P until it fights gravity (expect overshoot), add D to damp
+      the overshoot, add I last for residual error. When you're happy with the response, transfer
+      your gains to the robot — <code>odrive_ctrl_v7.py</code> uses <em>negative</em> gains, shown under each slider.
+    </p>
+  </header>
+
+  <section class="cards3">
+    <div class="card">
+      <h2>Initial conditions</h2>
+      <div class="row">
+        <label for="th0">Start angle &theta;&#8320;</label>
+        <input type="number" id="th0" value="10" step="0.5" min="-180" max="180"> <span>deg</span>
+        <span class="si" id="th0si"></span>
+      </div>
+      <div class="row">
+        <label for="thd0">Start rate &theta;&#775;&#8320;</label>
+        <input type="number" id="thd0" value="0" step="1" min="-1000" max="1000"> <span>deg/s</span>
+        <span class="si" id="thd0si"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Simulation</h2>
+      <div class="row">
+        <label for="dt">Time step dt</label>
+        <input type="number" id="dt" value="0.02" step="0.001" min="0.001" max="0.2"> <span>s</span>
+      </div>
+      <div class="row">
+        <label for="simT">Sim time</label>
+        <input type="number" id="simT" value="5" step="0.5" min="0.5" max="60"> <span>s</span>
+      </div>
+      <div class="row">
+        <input type="checkbox" id="linearChk" checked>
+        <label for="linearChk" style="min-width:0">Linearized (small-angle) dynamics</label>
+      </div>
+      <div class="row">
+        <input type="checkbox" id="nonlinChk">
+        <label for="nonlinChk" style="min-width:0">Full nonlinear dynamics</label>
+      </div>
+
+      <div class="lockbox">
+        <div class="row">
+          <input type="password" id="pwd" placeholder="passphrase" style="width:130px" autocomplete="off">
+          <button id="unlockBtn">Unlock</button>
+        </div>
+        <p class="hint">Advanced settings are locked. Your instructor has the passphrase.</p>
+        <p class="err" id="pwdErr">That's not it — keep thinking about what the robot does that this sim doesn't.</p>
+      </div>
+
+      <div class="locked-only">
+        <div class="row">
+          <input type="checkbox" id="satChk" checked>
+          <label for="satChk" style="min-width:0">Force saturation, max |F|</label>
+          <input type="number" id="fmax" value="30" step="5" min="1" max="1000"> <span>N</span>
+        </div>
+        <div class="row">
+          <label for="ctrlInt">Control interval</label>
+          <input type="number" id="ctrlInt" value="0.05" step="0.005" min="0.005" max="0.5"> <span>s</span>
+        </div>
+        <p class="hint">Control force is recomputed once per interval and held constant in between
+          (zero-order hold). Applied at most once per sim step.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Controller gains</h2>
+      <div class="gainrow">
+        <span class="gname">K<sub>P</sub></span>
+        <input type="range" id="kp" min="0" max="500" step="1" value="0">
+        <input type="number" id="kpN" min="0" max="500" step="1" value="0">
+      </div>
+      <p class="robot" id="kpRobot"></p>
+      <div class="gainrow">
+        <span class="gname">K<sub>I</sub></span>
+        <input type="range" id="ki" min="0" max="50" step="0.5" value="0">
+        <input type="number" id="kiN" min="0" max="50" step="0.5" value="0">
+      </div>
+      <p class="robot" id="kiRobot"></p>
+      <div class="gainrow">
+        <span class="gname">K<sub>D</sub></span>
+        <input type="range" id="kd" min="0" max="50" step="0.5" value="0">
+        <input type="number" id="kdN" min="0" max="50" step="0.5" value="0">
+      </div>
+      <p class="robot" id="kdRobot"></p>
+    </div>
+  </section>
+
+  <div class="actionrow">
+    <button id="runBtn" class="primary">Re-run simulation</button>
+    <button id="resetBtn">Reset defaults</button>
+    <span class="dirty" id="dirtyMsg"></span>
+  </div>
+
+  <p class="statusmsg" id="statusMsg"></p>
+
+  <section class="tiles">
+    <div class="tile">
+      <div class="tl">Settling time</div>
+      <div class="tv mono" id="settleVal">–</div>
+      <div class="tn" id="settleNote"></div>
+    </div>
+    <div class="tile">
+      <div class="tl">Peak commanded |F|</div>
+      <div class="tv mono" id="peakFVal">–</div>
+      <div class="tn" id="peakFNote"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Animation</h2>
+    <canvas id="anim" style="width:100%; height:280px" role="img" aria-label="Cart-pole animation"></canvas>
+    <div class="animbar">
+      <button id="playBtn">&#9654; Play</button>
+      <input type="range" id="scrub" min="0" max="100" step="1" value="0" aria-label="Scrub time">
+      <span class="tlabel" id="timeLbl">t = 0.00 s</span>
+    </div>
+  </section>
+
+  <section class="card" id="classicalCard">
+    <h2 style="display:inline-block">Classical analysis (linear model)
+      <span class="stalebadge" id="staleBadge">settings changed — plots out of date</span>
+    </h2>
+    <p class="hint" style="margin-bottom:10px">
+      These plots analyze the idealized linear feedback loop: continuous control, unlimited force.
+      Compensator C(s) = K<sub>P</sub> + K<sub>I</sub>/s + K<sub>D</sub>s acting on &theta;, plant &theta;(s)/F(s)
+      linearized about upright. <span id="csText"></span>
+    </p>
+    <button id="classicalBtn" class="primary">Update classical analysis plots</button>
+    <div id="classicalBody" style="display:none">
+      <div class="classical-row">
+        <div>
+          <canvas id="rl" style="height:320px"></canvas>
+          <p class="hint">Root locus: closed-loop poles as an overall gain multiplier k sweeps
+            0&rarr;&infin; on the current C(s). <span style="color:var(--series-1)">&bull;</span> locus,
+            &#10005; open-loop poles, &#9675; open-loop zeros,
+            <span style="color:var(--series-2)">&#9632;</span> closed-loop poles at k = 1 (your gains).</p>
+          <p class="verdict" id="clVerdict"></p>
+        </div>
+        <div>
+          <canvas id="nyq" style="height:320px"></canvas>
+          <p class="hint">Nyquist plot of the loop L(j&omega;). The plant has one unstable pole, so
+            stability requires exactly one counter-clockwise encirclement of &minus;1.</p>
+        </div>
+      </div>
+      <div class="bode" style="margin-top:8px">
+        <canvas id="bodeMag" style="height:190px"></canvas>
+        <canvas id="bodePhase" style="height:170px"></canvas>
+      </div>
+      <p class="clnote" id="clNote"></p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Response</h2>
+    <div class="plots-grid">
+      <div class="pw"><canvas id="pTh"></canvas></div>
+      <div class="pw"><canvas id="pThd"></canvas></div>
+      <div class="pw"><canvas id="pX"></canvas></div>
+      <div class="pw"><canvas id="pXd"></canvas></div>
+      <div class="pw"><canvas id="pF"></canvas></div>
+      <div class="fnote">
+        <div class="legend">
+          <span class="li"><span class="chip" style="background:var(--series-1)"></span>applied force</span>
+          <span class="li"><span class="chip" style="background:var(--muted)"></span>commanded force</span>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px"><button id="csvBtn">Download CSV</button></div>
+    <details id="tableDetails">
+      <summary>Data table</summary>
+      <div class="twrap" id="tableWrap"></div>
+    </details>
+  </section>
+
+  <footer>
+    System and sign conventions match <code>notebooks/tune_pid.ipynb</code>:
+    L = 0.60 m, m<sub>A</sub> = 0.261 kg, m<sub>B</sub> = 0.351 kg, b<sub>t</sub> = 0.2 N&middot;s/m,
+    b<sub>r</sub> = 0.0015 N&middot;m&middot;s/rad, g = 9.81 m/s&sup2;, I<sub>Byy</sub> = m<sub>B</sub>L&sup2;/12.
+    &theta; is measured from upright; the notebook's (negative-gain) PID convention is applied
+    internally, so slider values are magnitudes. Integrator: fixed-step RK4 with the control force
+    held constant across each step.
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ===== PURE MATH BEGIN (DOM-free, extractable for tests) ===== */
+
+var PAR = { L: 0.60, mA: 0.261, mB: 0.351, bt: 0.2, br: 0.0015, g: 9.81 };
+PAR.IByy = 1 / 12 * PAR.mB * PAR.L * PAR.L;
+var D0 = (PAR.mA + PAR.mB) * (4 * PAR.IByy + PAR.mB * PAR.L * PAR.L) - PAR.L * PAR.L * PAR.mB * PAR.mB;
+
+function nonlinearDeriv(y, F) {
+  var dx = y[1], qB = y[2], dqB = y[3];
+  var L = PAR.L, mA = PAR.mA, mB = PAR.mB, bt = PAR.bt, br = PAR.br, g = PAR.g, IByy = PAR.IByy;
+  var c = Math.cos(qB), s = Math.sin(qB);
+  var den = (mA + mB) * (4 * IByy + mB * L * L) - L * L * mB * mB * c * c;
+  var ddx = -0.5 * (2 * L * mB * c * (g * L * mB * s - 2 * br * dqB)
+            + (4 * IByy + mB * L * L) * (2 * bt * dx - 2 * F - L * mB * s * dqB * dqB)) / den;
+  var ddqB = (2 * (mA + mB) * (g * L * mB * s - 2 * br * dqB)
+            + L * mB * c * (2 * bt * dx - 2 * F - L * mB * s * dqB * dqB)) / den;
+  return [dx, ddx, dqB, ddqB];
+}
+
+var LIN = (function () {
+  var L = PAR.L, mA = PAR.mA, mB = PAR.mB, bt = PAR.bt, br = PAR.br, g = PAR.g, IByy = PAR.IByy;
+  return {
+    a1: -(4 * IByy + mB * L * L) * bt / D0,
+    a2: -g * L * L * mB * mB / D0,
+    a3: 2 * L * mB * br / D0,
+    b1: (4 * IByy + mB * L * L) / D0,
+    c1: 2 * L * mB * bt / D0,
+    c2: 2 * (mA + mB) * g * L * mB / D0,
+    c3: -4 * (mA + mB) * br / D0,
+    b2: -2 * L * mB / D0
+  };
+})();
+
+function linearDeriv(y, F) {
+  return [
+    y[1],
+    LIN.a1 * y[1] + LIN.a2 * y[2] + LIN.a3 * y[3] + LIN.b1 * F,
+    y[3],
+    LIN.c1 * y[1] + LIN.c2 * y[2] + LIN.c3 * y[3] + LIN.b2 * F
+  ];
+}
+
+/* cfg: { theta0, thetadot0 [rad], dt, T, kp, ki, kd (slider magnitudes >= 0),
+          linear, fmax (null = unlimited), ctrlInterval (null = every step) } */
+function simulate(cfg) {
+  var kpi = -cfg.kp, kii = -cfg.ki, kdi = -cfg.kd; // notebook/robot sign convention
+  var dt = cfg.dt;
+  var n = Math.round(cfg.T / dt);
+  var interval = (cfg.ctrlInterval == null) ? dt : Math.max(cfg.ctrlInterval, dt);
+  var deriv = cfg.linear ? linearDeriv : nonlinearDeriv;
+  var y = [0, 0, cfg.theta0, cfg.thetadot0];
+  var integral = 0, F = 0, Fraw = 0, nextCtrl = 0;
+  var t = [], x = [], xd = [], th = [], thd = [], Fs = [], Fraws = [];
+  var diverged = false;
+  for (var i = 0; i <= n; i++) {
+    var ti = i * dt;
+    if (ti >= nextCtrl - 1e-9) {
+      var e = -y[2], de = -y[3];
+      integral += e * interval;
+      Fraw = kpi * e + kii * integral + kdi * de;
+      F = (cfg.fmax == null) ? Fraw : Math.min(Math.max(Fraw, -cfg.fmax), cfg.fmax);
+      nextCtrl += interval;
+    }
+    t.push(ti); x.push(y[0]); xd.push(y[1]); th.push(y[2]); thd.push(y[3]);
+    Fs.push(F); Fraws.push(Fraw);
+    if (i === n) break;
+    var k1 = deriv(y, F);
+    var k2 = deriv([y[0] + 0.5 * dt * k1[0], y[1] + 0.5 * dt * k1[1],
+                    y[2] + 0.5 * dt * k1[2], y[3] + 0.5 * dt * k1[3]], F);
+    var k3 = deriv([y[0] + 0.5 * dt * k2[0], y[1] + 0.5 * dt * k2[1],
+                    y[2] + 0.5 * dt * k2[2], y[3] + 0.5 * dt * k2[3]], F);
+    var k4 = deriv([y[0] + dt * k3[0], y[1] + dt * k3[1],
+                    y[2] + dt * k3[2], y[3] + dt * k3[3]], F);
+    y = [y[0] + dt / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]),
+         y[1] + dt / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]),
+         y[2] + dt / 6 * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]),
+         y[3] + dt / 6 * (k1[3] + 2 * k2[3] + 2 * k3[3] + k4[3])];
+    if (!isFinite(y[0]) || !isFinite(y[1]) || !isFinite(y[2]) || !isFinite(y[3])
+        || Math.abs(y[2]) > 50 || Math.abs(y[0]) > 50) {
+      diverged = true;
+      t.push((i + 1) * dt); x.push(y[0]); xd.push(y[1]); th.push(y[2]); thd.push(y[3]);
+      Fs.push(F); Fraws.push(Fraw);
+      break;
+    }
+  }
+  return { t: t, x: x, xd: xd, th: th, thd: thd, F: Fs, Fraw: Fraws, diverged: diverged };
+}
+
+/* Settling: last time |theta| leaves a band of 5% of |theta0|
+   (5% of the peak |theta| if theta0 is zero). */
+function settlingInfo(res, theta0) {
+  var band = 0.05 * Math.abs(theta0), i;
+  if (band < 1e-12) {
+    var m = 0;
+    for (i = 0; i < res.th.length; i++) m = Math.max(m, Math.abs(res.th[i]));
+    band = 0.05 * m;
+  }
+  if (res.diverged) return { time: null, band: band, diverged: true };
+  if (band < 1e-12) return { time: 0, band: 0, diverged: false };
+  var last = -1;
+  for (i = 0; i < res.th.length; i++) if (Math.abs(res.th[i]) > band) last = i;
+  if (last === -1) return { time: 0, band: band, diverged: false };
+  if (last === res.th.length - 1) return { time: null, band: band, diverged: false };
+  return { time: res.t[last + 1], band: band, diverged: false };
+}
+
+/* --- complex & polynomial helpers (coefficients highest-power first) --- */
+function cAdd(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+function cSub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+function cMul(a, b) { return [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]; }
+function cDiv(a, b) {
+  var d = b[0] * b[0] + b[1] * b[1];
+  return [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d];
+}
+function cAbs(a) { return Math.hypot(a[0], a[1]); }
+
+function polyMul(p, q) {
+  var r = new Array(p.length + q.length - 1).fill(0);
+  for (var i = 0; i < p.length; i++)
+    for (var j = 0; j < q.length; j++) r[i + j] += p[i] * q[j];
+  return r;
+}
+function polyAdd(p, q) {
+  var n = Math.max(p.length, q.length), r = new Array(n).fill(0), i;
+  for (i = 0; i < p.length; i++) r[n - p.length + i] += p[i];
+  for (i = 0; i < q.length; i++) r[n - q.length + i] += q[i];
+  return r;
+}
+function polySub(p, q) { return polyAdd(p, q.map(function (v) { return -v; })); }
+function polyScale(p, k) { return p.map(function (v) { return v * k; }); }
+function polyTrim(p) {
+  var m = 0, i;
+  for (i = 0; i < p.length; i++) m = Math.max(m, Math.abs(p[i]));
+  if (m === 0) return [0];
+  var s = 0;
+  while (s < p.length - 1 && Math.abs(p[s]) <= 1e-12 * m) s++;
+  return p.slice(s);
+}
+function polyValC(p, s) {
+  var r = [0, 0];
+  for (var i = 0; i < p.length; i++) r = cAdd(cMul(r, s), [p[i], 0]);
+  return r;
+}
+
+/* Durand-Kerner root finder for real-coefficient polynomials (degree <= ~8). */
+function polyRoots(pIn) {
+  var p = polyTrim(pIn), i, j;
+  if (p.length <= 1) return [];
+  var maxc = 0;
+  for (i = 0; i < p.length; i++) maxc = Math.max(maxc, Math.abs(p[i]));
+  var roots = [];
+  p = p.slice();
+  while (p.length > 1 && Math.abs(p[p.length - 1]) <= 1e-14 * maxc) { p.pop(); roots.push([0, 0]); }
+  var m = p.length - 1;
+  if (m < 1) return roots;
+  var a = p.map(function (c) { return c / p[0]; });
+  var R = 0;
+  for (i = 1; i < a.length; i++) R = Math.max(R, Math.abs(a[i]));
+  R = 1 + R;
+  var z = [];
+  for (i = 0; i < m; i++) {
+    var ang = 2 * Math.PI * i / m + 0.4;
+    z.push([0.5 * R * Math.cos(ang), 0.5 * R * Math.sin(ang)]);
+  }
+  for (var iter = 0; iter < 700; iter++) {
+    var maxStep = 0;
+    for (i = 0; i < m; i++) {
+      var num = polyValC(a, z[i]);
+      var den = [1, 0];
+      for (j = 0; j < m; j++) {
+        if (j === i) continue;
+        den = cMul(den, cSub(z[i], z[j]));
+      }
+      if (cAbs(den) === 0) { den = [1e-12, 0]; }
+      var d = cDiv(num, den);
+      z[i] = cSub(z[i], d);
+      maxStep = Math.max(maxStep, cAbs(d));
+    }
+    if (maxStep < 1e-12 * Math.max(1, R)) break;
+  }
+  return roots.concat(z);
+}
+
+/* Plant theta(s)/F(s) of the linearization. Note c1*b1 - a1*b2 = 0 exactly for
+   this system: the plant has a zero at the origin. */
+function plantTF() {
+  var numG = [LIN.b2, LIN.c1 * LIN.b1 - LIN.a1 * LIN.b2];
+  // c1*b1 - a1*b2 is structurally zero (identical products); snap float residue
+  if (Math.abs(numG[1]) < 1e-9 * Math.abs(numG[0])) numG[1] = 0;
+  var denG = polySub(polyMul([1, -LIN.c3, -LIN.c2], [1, -LIN.a1]),
+                     polyMul([LIN.c1], [LIN.a3, LIN.a2]));
+  return { numG: numG, denG: denG };
+}
+
+/* Loop transfer L(s) = C(s) * (-G(s)) with C(s) = (kd s^2 + kp s + ki)/s.
+   The plant's origin zero cancels the controller's integrator pole exactly;
+   cancel matched origin roots so plots and pole lists show the true loop. */
+function loopTF(kp, ki, kd) {
+  var tf = plantTF();
+  var negNumG = tf.numG.map(function (v) { return -v; });
+  var num = polyTrim(polyMul([kd, kp, ki], negNumG));
+  var den = polyTrim(polyMul(tf.denG, [1, 0]));
+  var mn = 0, md = 0, i;
+  for (i = 0; i < num.length; i++) mn = Math.max(mn, Math.abs(num[i]));
+  for (i = 0; i < den.length; i++) md = Math.max(md, Math.abs(den[i]));
+  while (num.length > 1 && den.length > 1
+         && Math.abs(num[num.length - 1]) <= 1e-9 * mn
+         && Math.abs(den[den.length - 1]) <= 1e-9 * md) {
+    num.pop(); den.pop();
+  }
+  return { num: num, den: den, zeroGain: mn === 0 };
+}
+
+function closedLoopPoles(kp, ki, kd, k) {
+  var lt = loopTF(kp, ki, kd);
+  if (lt.zeroGain) return polyRoots(lt.den);
+  return polyRoots(polyAdd(lt.den, polyScale(lt.num, k)));
+}
+
+function freqResp(num, den, w) {
+  return cDiv(polyValC(num, [0, w]), polyValC(den, [0, w]));
+}
+
+function logspace(a, b, n) {
+  var r = [];
+  for (var i = 0; i < n; i++) r.push(Math.pow(10, a + (b - a) * i / (n - 1)));
+  return r;
+}
+
+/* ===== PURE MATH END ===== */
+
+/* ---------------- UI ---------------- */
+var COL = {
+  s1: "#2a78d6", s2: "#008300", ink: "#0b0b0b", ink2: "#52514e", muted: "#898781",
+  grid: "#e1e0d9", axis: "#c3c2b7", good: "#0ca30c", crit: "#d03b3b",
+  surface: "#fcfcfb", band: "#f0efec", pole: "#e34948"
+};
+var $ = function (id) { return document.getElementById(id); };
+var deg = function (r) { return r * 180 / Math.PI; };
+var rad = function (d) { return d * Math.PI / 180; };
+
+var unlocked = false;
+var lastRes = null, lastCfg = null;
+
+function readCfg() {
+  var th0 = parseFloat($("th0").value), thd0 = parseFloat($("thd0").value);
+  var dt = parseFloat($("dt").value), T = parseFloat($("simT").value);
+  var kp = parseFloat($("kpN").value), ki = parseFloat($("kiN").value), kd = parseFloat($("kdN").value);
+  if (![th0, thd0, dt, T, kp, ki, kd].every(isFinite)) return { err: "Fill in every input with a number." };
+  if (dt <= 0 || T <= 0) return { err: "dt and sim time must be positive." };
+  if (T / dt > 100000) return { err: "Too many steps (sim time / dt > 100,000) — increase dt or shorten the sim." };
+  var cfg = {
+    theta0: rad(th0), thetadot0: rad(thd0), dt: dt, T: T,
+    kp: kp, ki: ki, kd: kd,
+    linear: $("linearChk").checked,
+    fmax: null, ctrlInterval: null
+  };
+  if (unlocked) {
+    if ($("satChk").checked) {
+      var fm = parseFloat($("fmax").value);
+      if (!isFinite(fm) || fm <= 0) return { err: "Max force must be a positive number." };
+      cfg.fmax = fm;
+    }
+    var ci = parseFloat($("ctrlInt").value);
+    if (!isFinite(ci) || ci <= 0) return { err: "Control interval must be a positive number." };
+    cfg.ctrlInterval = ci;
+  }
+  return { cfg: cfg };
+}
+
+/* ---- canvas helpers ---- */
+function prep(canvas) {
+  var dpr = window.devicePixelRatio || 1;
+  var w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
+  var ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx: ctx, w: w, h: h };
+}
+
+function niceTicks(lo, hi, target) {
+  if (!(hi > lo)) { hi = lo + 1; }
+  var span = hi - lo, raw = span / (target || 5);
+  var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  var norm = raw / mag, step;
+  if (norm < 1.5) step = 1; else if (norm < 3) step = 2; else if (norm < 7) step = 5; else step = 10;
+  step *= mag;
+  var ticks = [];
+  for (var v = Math.ceil(lo / step) * step; v <= hi + 1e-9 * span; v += step) ticks.push(Math.abs(v) < 1e-12 * span ? 0 : v);
+  return { ticks: ticks, step: step };
+}
+function fmtTick(v, step) {
+  if (v === 0) return "0";
+  if (Math.abs(v) >= 10000 || (Math.abs(v) < 0.001)) return v.toExponential(0);
+  var d = Math.max(0, -Math.floor(Math.log10(step)) + (step / Math.pow(10, Math.floor(Math.log10(step))) % 1 ? 1 : 0));
+  return v.toFixed(Math.min(6, d));
+}
+
+/* Generic line plot. series: [{y, color, dash, step, label}] sharing x array. */
+function linePlot(canvas, o) {
+  var p = prep(canvas), ctx = p.ctx;
+  var M = { l: 52, r: 10, t: 24, b: 26 };
+  var aw = p.w - M.l - M.r, ah = p.h - M.t - M.b;
+  var xlo = o.x[0], xhi = o.x[o.x.length - 1];
+  if (!(xhi > xlo)) xhi = xlo + 1;
+  var ylo = Infinity, yhi = -Infinity, i, j;
+  for (j = 0; j < o.series.length; j++) {
+    var ys = o.series[j].y;
+    for (i = 0; i < ys.length; i++) {
+      var v = ys[i];
+      if (isFinite(v)) { if (v < ylo) ylo = v; if (v > yhi) yhi = v; }
+    }
+  }
+  if (o.band) { ylo = Math.min(ylo, -o.band * 1.5); yhi = Math.max(yhi, o.band * 1.5); }
+  if (!isFinite(ylo)) { ylo = -1; yhi = 1; }
+  if (yhi - ylo < 1e-12) { var pad0 = Math.max(1e-6, Math.abs(ylo) * 0.1 + 0.1); ylo -= pad0; yhi += pad0; }
+  var padY = (yhi - ylo) * 0.08; ylo -= padY; yhi += padY;
+  var X = function (v) { return M.l + (v - xlo) / (xhi - xlo) * aw; };
+  var Y = function (v) { return M.t + (yhi - v) / (yhi - ylo) * ah; };
+
+  var yt = niceTicks(ylo, yhi, 4), xt = niceTicks(xlo, xhi, 6);
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.fillStyle = COL.muted;
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 1;
+  for (i = 0; i < yt.ticks.length; i++) {
+    var ty = Y(yt.ticks[i]);
+    ctx.beginPath(); ctx.moveTo(M.l, ty); ctx.lineTo(p.w - M.r, ty); ctx.stroke();
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(fmtTick(yt.ticks[i], yt.step), M.l - 6, ty);
+  }
+  for (i = 0; i < xt.ticks.length; i++) {
+    var tx = X(xt.ticks[i]);
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(fmtTick(xt.ticks[i], xt.step), tx, p.h - M.b + 6);
+  }
+  // settling band + marker
+  if (o.band) {
+    ctx.fillStyle = COL.band;
+    ctx.fillRect(M.l, Y(o.band), aw, Y(-o.band) - Y(o.band));
+  }
+  if (o.vline != null && o.vline >= xlo && o.vline <= xhi) {
+    ctx.strokeStyle = COL.good; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(X(o.vline), M.t); ctx.lineTo(X(o.vline), M.t + ah); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = COL.good; ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText("settled", X(o.vline) + 4, M.t + 2);
+  }
+  // zero baseline
+  if (ylo < 0 && yhi > 0) {
+    ctx.strokeStyle = COL.axis; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(M.l, Y(0)); ctx.lineTo(p.w - M.r, Y(0)); ctx.stroke();
+  }
+  // frame baseline
+  ctx.strokeStyle = COL.axis;
+  ctx.beginPath(); ctx.moveTo(M.l, M.t + ah); ctx.lineTo(p.w - M.r, M.t + ah); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(M.l, M.t); ctx.lineTo(M.l, M.t + ah); ctx.stroke();
+
+  // series
+  for (j = 0; j < o.series.length; j++) {
+    var s = o.series[j];
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2;
+    ctx.setLineDash(s.dash ? [5, 4] : []);
+    ctx.beginPath();
+    var started = false, prevY = null;
+    for (i = 0; i < o.x.length; i++) {
+      var vy = s.y[i];
+      if (!isFinite(vy)) { started = false; continue; }
+      var px = X(o.x[i]), py = Y(Math.max(ylo - (yhi - ylo), Math.min(yhi + (yhi - ylo), vy)));
+      if (!started) { ctx.moveTo(px, py); started = true; }
+      else {
+        if (s.step && prevY != null) ctx.lineTo(px, prevY);
+        ctx.lineTo(px, py);
+      }
+      prevY = py;
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // title
+  ctx.fillStyle = COL.ink2; ctx.font = "600 12px system-ui, sans-serif";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText(o.title, M.l, 4);
+
+  canvas._tt = {
+    ml: M.l, aw: aw, mt: M.t, ah: ah, x: o.x,
+    X: X,
+    lines: o.tip || null
+  };
+}
+
+/* ---- hover tooltips on time plots ---- */
+function attachHover(canvas) {
+  var wrap = canvas.parentElement;
+  var ch = document.createElement("div"); ch.className = "ch";
+  var tip = document.createElement("div"); tip.className = "tip";
+  wrap.appendChild(ch); wrap.appendChild(tip);
+  canvas.addEventListener("mousemove", function (ev) {
+    var st = canvas._tt;
+    if (!st || !st.lines) { ch.style.display = "none"; tip.style.display = "none"; return; }
+    var r = canvas.getBoundingClientRect();
+    var mx = ev.clientX - r.left;
+    if (mx < st.ml || mx > st.ml + st.aw) { ch.style.display = "none"; tip.style.display = "none"; return; }
+    // nearest index (uniform t grid)
+    var frac = (mx - st.ml) / st.aw;
+    var idx = Math.round(frac * (st.x.length - 1));
+    idx = Math.max(0, Math.min(st.x.length - 1, idx));
+    var px = st.X(st.x[idx]);
+    ch.style.display = "block";
+    ch.style.left = px + "px"; ch.style.top = st.mt + "px"; ch.style.height = st.ah + "px";
+    tip.style.display = "block";
+    tip.textContent = st.lines(idx);
+    var tw = tip.offsetWidth;
+    tip.style.left = (px + 10 + tw > r.width ? px - tw - 10 : px + 10) + "px";
+    tip.style.top = (st.mt + 8) + "px";
+  });
+  canvas.addEventListener("mouseleave", function () {
+    ch.style.display = "none"; tip.style.display = "none";
+  });
+}
+
+/* ---- animation ---- */
+var anim = { playing: false, t: 0, raf: null, lastWall: null };
+
+function drawFrame(tSec) {
+  var c = $("anim"), p = prep(c), ctx = p.ctx;
+  if (!lastRes) return;
+  var idx = Math.max(0, Math.min(lastRes.t.length - 1, Math.round(tSec / lastCfg.dt)));
+  var xC = lastRes.x[idx], th = lastRes.th[idx];
+  if (!isFinite(xC)) xC = 0;
+  if (!isFinite(th)) th = 0;
+
+  // fixed view scale — the cart is allowed to leave the window
+  var scale = Math.min((p.w - 30) / 2.0, (p.h - 60) / (2 * PAR.L + 0.4));
+  var cx = p.w / 2, railY = p.h * 0.62;
+  var W = function (wx) { return cx + wx * scale; };
+
+  // rail (1.8 m, as on the robot) and center tick
+  ctx.strokeStyle = COL.axis; ctx.lineWidth = 4; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(W(-0.9), railY); ctx.lineTo(W(0.9), railY); ctx.stroke();
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx, railY - 7); ctx.lineTo(cx, railY + 7); ctx.stroke();
+
+  // cart
+  var cw = 0.2 * scale, chh = 0.15 * scale;
+  ctx.fillStyle = COL.muted;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(W(xC) - cw / 2, railY - chh / 2, cw, chh, 4);
+  else ctx.rect(W(xC) - cw / 2, railY - chh / 2, cw, chh);
+  ctx.fill();
+
+  // pole (theta from upright, tip at x + L sin(theta), height L cos(theta))
+  var tipX = W(xC + PAR.L * Math.sin(th));
+  var tipY = railY - PAR.L * Math.cos(th) * scale;
+  ctx.strokeStyle = COL.pole; ctx.lineWidth = 5; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(W(xC), railY); ctx.lineTo(tipX, tipY); ctx.stroke();
+  ctx.fillStyle = COL.ink;
+  ctx.beginPath(); ctx.arc(W(xC), railY, 4, 0, 2 * Math.PI); ctx.fill();
+
+  // HUD
+  ctx.fillStyle = COL.muted; ctx.font = "12px system-ui, sans-serif";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText("θ = " + deg(th).toFixed(1) + "°   x = " + xC.toFixed(2) + " m", 10, 8);
+  if (lastRes.diverged && idx === lastRes.t.length - 1) {
+    ctx.fillStyle = COL.crit; ctx.font = "600 13px system-ui, sans-serif";
+    ctx.fillText("⚠ simulation diverged", 10, 26);
+  }
+
+  $("timeLbl").textContent = "t = " + tSec.toFixed(2) + " s";
+  $("scrub").value = idx;
+}
+
+function setPlaying(on) {
+  anim.playing = on;
+  $("playBtn").innerHTML = on ? "&#10074;&#10074; Pause" : "&#9654; Play";
+  if (on) {
+    anim.lastWall = null;
+    var loop = function (wall) {
+      if (!anim.playing) return;
+      if (anim.lastWall != null) {
+        anim.t += (wall - anim.lastWall) / 1000;
+        var tEnd = lastRes ? lastRes.t[lastRes.t.length - 1] : 0;
+        if (anim.t >= tEnd) { anim.t = tEnd; drawFrame(anim.t); setPlaying(false); return; }
+      }
+      anim.lastWall = wall;
+      drawFrame(anim.t);
+      anim.raf = requestAnimationFrame(loop);
+    };
+    anim.raf = requestAnimationFrame(loop);
+  } else if (anim.raf) {
+    cancelAnimationFrame(anim.raf);
+    anim.raf = null;
+  }
+}
+
+/* ---- classical analysis ---- */
+function drawAxesXY(canvas, o) {
+  // o: {xlo,xhi,ylo,yhi,xlabel,ylabel,title, equal}
+  var p = prep(canvas), ctx = p.ctx;
+  var M = { l: 52, r: 12, t: 24, b: 28 };
+  var aw = p.w - M.l - M.r, ah = p.h - M.t - M.b;
+  if (o.equal) {
+    var sx = aw / (o.xhi - o.xlo), sy = ah / (o.yhi - o.ylo);
+    var s = Math.min(sx, sy);
+    var xc = (o.xlo + o.xhi) / 2, yc = (o.ylo + o.yhi) / 2;
+    o.xlo = xc - aw / s / 2; o.xhi = xc + aw / s / 2;
+    o.ylo = yc - ah / s / 2; o.yhi = yc + ah / s / 2;
+  }
+  var X = function (v) { return M.l + (v - o.xlo) / (o.xhi - o.xlo) * aw; };
+  var Y = function (v) { return M.t + (o.yhi - v) / (o.yhi - o.ylo) * ah; };
+  var xt = niceTicks(o.xlo, o.xhi, 6), yt = niceTicks(o.ylo, o.yhi, 5), i;
+  ctx.font = "11px system-ui, sans-serif";
+  for (i = 0; i < yt.ticks.length; i++) {
+    var ty = Y(yt.ticks[i]);
+    ctx.strokeStyle = COL.grid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(M.l, ty); ctx.lineTo(p.w - M.r, ty); ctx.stroke();
+    ctx.fillStyle = COL.muted; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(fmtTick(yt.ticks[i], yt.step), M.l - 6, ty);
+  }
+  for (i = 0; i < xt.ticks.length; i++) {
+    var tx = X(xt.ticks[i]);
+    ctx.strokeStyle = COL.grid;
+    ctx.beginPath(); ctx.moveTo(tx, M.t); ctx.lineTo(tx, M.t + ah); ctx.stroke();
+    ctx.fillStyle = COL.muted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(fmtTick(xt.ticks[i], xt.step), tx, p.h - M.b + 6);
+  }
+  // zero axes
+  ctx.strokeStyle = COL.axis; ctx.lineWidth = 1.2;
+  if (o.xlo < 0 && o.xhi > 0) { ctx.beginPath(); ctx.moveTo(X(0), M.t); ctx.lineTo(X(0), M.t + ah); ctx.stroke(); }
+  if (o.ylo < 0 && o.yhi > 0) { ctx.beginPath(); ctx.moveTo(M.l, Y(0)); ctx.lineTo(p.w - M.r, Y(0)); ctx.stroke(); }
+  ctx.fillStyle = COL.ink2; ctx.font = "600 12px system-ui, sans-serif";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText(o.title, M.l, 4);
+  ctx.fillStyle = COL.muted; ctx.font = "11px system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  if (o.xlabel) ctx.fillText(o.xlabel, M.l + aw / 2, p.h - 2);
+  return { ctx: ctx, X: X, Y: Y, M: M, aw: aw, ah: ah, w: p.w, h: p.h, xlo: o.xlo, xhi: o.xhi, ylo: o.ylo, yhi: o.yhi };
+}
+
+function updateClassical() {
+  var r = readCfg();
+  if (r.err) { $("statusMsg").textContent = r.err; return; }
+  var cfg = r.cfg;
+  var kp = cfg.kp, ki = cfg.ki, kd = cfg.kd;
+  $("classicalBody").style.display = "block";
+  $("classicalBody").classList.remove("stale");
+  $("staleBadge").classList.remove("on");
+  $("csText").innerHTML = "Current: C(s) = " + kp + " + " + ki + "/s + " + kd + "s.";
+
+  var lt = loopTF(kp, ki, kd);
+  var polesOL = polyRoots(lt.den);
+  var zerosOL = lt.zeroGain ? [] : polyRoots(lt.num);
+  var polesCL = lt.zeroGain ? polesOL : polyRoots(polyAdd(lt.den, lt.num));
+
+  /* --- root locus --- */
+  var featR = [], featI = [], i, j;
+  var feats = polesOL.concat(zerosOL, polesCL);
+  for (i = 0; i < feats.length; i++) { featR.push(feats[i][0]); featI.push(feats[i][1]); }
+  var xlo = Math.min.apply(null, featR), xhi = Math.max.apply(null, featR);
+  var yhiF = Math.max.apply(null, featI.map(Math.abs));
+  var spanX = Math.max(4, (xhi - xlo)); xlo -= 0.35 * spanX; xhi += 0.35 * spanX;
+  var yhi = Math.max(3, yhiF * 1.4);
+  var ax = drawAxesXY($("rl"), { xlo: xlo, xhi: xhi, ylo: -yhi, yhi: yhi, title: "Root locus", xlabel: "Re(s)  [rad/s]" });
+  var ctx = ax.ctx;
+  if (!lt.zeroGain) {
+    var ks = logspace(-3, 3.5, 380);
+    ctx.fillStyle = COL.s1;
+    for (i = 0; i < ks.length; i++) {
+      var rts = polyRoots(polyAdd(lt.den, polyScale(lt.num, ks[i])));
+      for (j = 0; j < rts.length; j++) {
+        var px = ax.X(rts[j][0]), py = ax.Y(rts[j][1]);
+        if (px >= ax.M.l && px <= ax.w - ax.M.r && py >= ax.M.t && py <= ax.M.t + ax.ah) {
+          ctx.fillRect(px - 1, py - 1, 2.4, 2.4);
+        }
+      }
+    }
+  } else {
+    ctx.fillStyle = COL.ink2; ctx.font = "13px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Set a nonzero gain to draw the locus.", ax.M.l + ax.aw / 2, ax.M.t + ax.ah / 2);
+  }
+  ctx.strokeStyle = COL.ink; ctx.lineWidth = 1.8;
+  for (i = 0; i < polesOL.length; i++) {
+    var xx = ax.X(polesOL[i][0]), yy = ax.Y(polesOL[i][1]);
+    ctx.beginPath();
+    ctx.moveTo(xx - 5, yy - 5); ctx.lineTo(xx + 5, yy + 5);
+    ctx.moveTo(xx - 5, yy + 5); ctx.lineTo(xx + 5, yy - 5);
+    ctx.stroke();
+  }
+  for (i = 0; i < zerosOL.length; i++) {
+    ctx.beginPath(); ctx.arc(ax.X(zerosOL[i][0]), ax.Y(zerosOL[i][1]), 5, 0, 2 * Math.PI); ctx.stroke();
+  }
+  if (!lt.zeroGain) {
+    for (i = 0; i < polesCL.length; i++) {
+      var qx = ax.X(polesCL[i][0]), qy = ax.Y(polesCL[i][1]);
+      ctx.fillStyle = "#fff"; ctx.fillRect(qx - 5, qy - 5, 10, 10); // 2px surface ring
+      ctx.fillStyle = COL.s2; ctx.fillRect(qx - 4, qy - 4, 8, 8);
+    }
+  }
+
+  /* --- Bode --- */
+  var ws = logspace(-1, 3, 400), mags = [], phs = [], prevPh = null;
+  for (i = 0; i < ws.length; i++) {
+    if (lt.zeroGain) { mags.push(NaN); phs.push(NaN); continue; }
+    var Lw = freqResp(lt.num, lt.den, ws[i]);
+    mags.push(20 * Math.log10(cAbs(Lw)));
+    var ph = Math.atan2(Lw[1], Lw[0]);
+    if (prevPh != null) { while (ph - prevPh > Math.PI) ph -= 2 * Math.PI; while (ph - prevPh < -Math.PI) ph += 2 * Math.PI; }
+    prevPh = ph;
+    phs.push(deg(ph));
+  }
+
+  /* gain/phase margins from the L(jω) sweep (linear interp on the log-ω grid) */
+  var gmAnnot = null, pmAnnot = null;
+  if (!lt.zeroGain) {
+    var interpW = function (i0, f) {
+      var lw = Math.log10(ws[i0]) + f * (Math.log10(ws[i0 + 1]) - Math.log10(ws[i0]));
+      return Math.pow(10, lw);
+    };
+    var bestPm = null, bestGm = null;
+    for (i = 1; i < ws.length; i++) {
+      if (isFinite(mags[i - 1]) && isFinite(mags[i]) && mags[i - 1] * mags[i] < 0) {
+        var fg = mags[i - 1] / (mags[i - 1] - mags[i]);
+        var wgc = interpW(i - 1, fg);
+        var Lg = freqResp(lt.num, lt.den, wgc);
+        var pm = 180 + deg(Math.atan2(Lg[1], Lg[0]));
+        if (pm > 180) pm -= 360;
+        var yg = phs[i - 1] + fg * (phs[i] - phs[i - 1]);
+        if (bestPm == null || Math.abs(pm) < Math.abs(bestPm.pm)) bestPm = { w: wgc, y: yg, pm: pm };
+      }
+      var d0 = phs[i - 1] + 180, d1 = phs[i] + 180;
+      if (isFinite(d0) && isFinite(d1) && d0 * d1 < 0) {
+        var fp = d0 / (d0 - d1);
+        var wpc = interpW(i - 1, fp);
+        var Lp = freqResp(lt.num, lt.den, wpc);
+        var gm = -20 * Math.log10(cAbs(Lp));
+        var yp = mags[i - 1] + fp * (mags[i] - mags[i - 1]);
+        if (bestGm == null || Math.abs(gm) < Math.abs(bestGm.gm)) bestGm = { w: wpc, y: yp, gm: gm };
+      }
+    }
+    gmAnnot = bestGm
+      ? { marker: { w: bestGm.w, y: bestGm.y }, label: "GM = " + bestGm.gm.toFixed(1) + " dB @ " + bestGm.w.toPrecision(3) + " rad/s" }
+      : { marker: null, label: "GM: no −180° crossing in range" };
+    pmAnnot = bestPm
+      ? { marker: { w: bestPm.w, y: bestPm.y }, bottom: true, label: "PM = " + bestPm.pm.toFixed(1) + "° @ " + bestPm.w.toPrecision(3) + " rad/s" }
+      : { marker: null, bottom: true, label: "PM: no 0 dB crossing in range" };
+  }
+  drawBodePanel($("bodeMag"), ws, mags, "Bode magnitude of loop L(jω)", "dB", 0, gmAnnot);
+  drawBodePanel($("bodePhase"), ws, phs, "Bode phase", "deg", -180, pmAnnot);
+
+  /* --- Nyquist --- */
+  drawNyquist($("nyq"), lt);
+
+  /* --- verdict --- */
+  if (lt.zeroGain) {
+    $("clVerdict").innerHTML = "All gains are zero — open-loop plant poles: " + polesText(polesOL) + ".";
+    $("clNote").textContent = "";
+  } else {
+    var unstable = polesCL.some(function (pz) { return pz[0] > 1e-7; });
+    $("clVerdict").innerHTML = "Closed-loop poles (k = 1): " + polesText(polesCL) + " &nbsp;→&nbsp; " +
+      (unstable
+        ? '<span style="color:' + COL.crit + '">⚠ pole(s) in the right half-plane — linear loop UNSTABLE</span>'
+        : '<span style="color:' + COL.good + '">✓ all poles in the left half-plane — linear loop stable</span>');
+    $("clNote").textContent = "A pole-zero pair cancels exactly at the origin (the plant θ(s)/F(s) has a zero at s = 0), " +
+      "so integral action changes the θ loop less than you might expect. Remember what these plots assume: " +
+      "the force is never limited and the control law runs continuously. The gain/phase margins are read " +
+      "off L(jω); because this plant is open-loop unstable, interpret them with care — the closed-loop " +
+      "pole locations under the root locus are the definitive stability check.";
+  }
+}
+
+function polesText(ps) {
+  var seen = [], out = [], i;
+  for (i = 0; i < ps.length; i++) {
+    var re = ps[i][0], im = ps[i][1];
+    if (im < -1e-7) continue; // print conjugate pairs once
+    var key = re.toPrecision(4) + "/" + Math.abs(im).toPrecision(4);
+    if (seen.indexOf(key) >= 0) continue;
+    seen.push(key);
+    out.push(Math.abs(im) > 1e-7
+      ? re.toFixed(2) + " ± " + Math.abs(im).toFixed(2) + "j"
+      : re.toFixed(3));
+  }
+  return "s = " + out.join(",&nbsp; ");
+}
+
+function drawBodePanel(canvas, ws, vals, title, unit, hline, annot) {
+  var lo = Infinity, hi = -Infinity, i;
+  for (i = 0; i < vals.length; i++) if (isFinite(vals[i])) { lo = Math.min(lo, vals[i]); hi = Math.max(hi, vals[i]); }
+  if (!isFinite(lo)) { lo = -1; hi = 1; }
+  if (hline != null) { lo = Math.min(lo, hline); hi = Math.max(hi, hline); }
+  var pad = (hi - lo) * 0.08 + 1; lo -= pad; hi += pad;
+  var p = prep(canvas), ctx = p.ctx;
+  var M = { l: 52, r: 12, t: 24, b: 26 };
+  var aw = p.w - M.l - M.r, ah = p.h - M.t - M.b;
+  var lw0 = Math.log10(ws[0]), lw1 = Math.log10(ws[ws.length - 1]);
+  var X = function (w) { return M.l + (Math.log10(w) - lw0) / (lw1 - lw0) * aw; };
+  var Y = function (v) { return M.t + (hi - v) / (hi - lo) * ah; };
+  ctx.font = "11px system-ui, sans-serif";
+  // decade gridlines
+  for (var d = Math.ceil(lw0); d <= Math.floor(lw1); d++) {
+    var tx = X(Math.pow(10, d));
+    ctx.strokeStyle = COL.grid; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(tx, M.t); ctx.lineTo(tx, M.t + ah); ctx.stroke();
+    ctx.fillStyle = COL.muted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(d === 0 ? "1" : "10" + sup(d), tx, p.h - M.b + 6);
+  }
+  var yt = niceTicks(lo, hi, 4);
+  for (i = 0; i < yt.ticks.length; i++) {
+    var ty = Y(yt.ticks[i]);
+    ctx.strokeStyle = COL.grid;
+    ctx.beginPath(); ctx.moveTo(M.l, ty); ctx.lineTo(p.w - M.r, ty); ctx.stroke();
+    ctx.fillStyle = COL.muted; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(fmtTick(yt.ticks[i], yt.step), M.l - 6, ty);
+  }
+  if (hline != null && hline >= lo && hline <= hi) {
+    ctx.strokeStyle = COL.axis; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(M.l, Y(hline)); ctx.lineTo(p.w - M.r, Y(hline)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = COL.s1; ctx.lineWidth = 2;
+  ctx.beginPath();
+  var started = false;
+  for (i = 0; i < ws.length; i++) {
+    if (!isFinite(vals[i])) { started = false; continue; }
+    var px = X(ws[i]), py = Y(vals[i]);
+    if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+  if (annot) {
+    if (annot.marker) {
+      var ax = X(annot.marker.w);
+      ctx.strokeStyle = COL.ink2; ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(ax, M.t); ctx.lineTo(ax, M.t + ah); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = COL.ink;
+      ctx.beginPath(); ctx.arc(ax, Y(annot.marker.y), 3.5, 0, 2 * Math.PI); ctx.fill();
+    }
+    ctx.fillStyle = COL.ink2; ctx.font = "600 11.5px system-ui, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "top";
+    ctx.fillText(annot.label, p.w - M.r - 4, annot.bottom ? M.t + ah - 16 : M.t + 4);
+  }
+  ctx.fillStyle = COL.ink2; ctx.font = "600 12px system-ui, sans-serif";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText(title + "  [" + unit + "]", M.l, 4);
+  ctx.fillStyle = COL.muted; ctx.font = "11px system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  ctx.fillText("ω  [rad/s]", M.l + aw / 2, p.h - 1);
+}
+function sup(d) {
+  var m = { "-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵" };
+  return String(d).split("").map(function (ch) { return m[ch] || ch; }).join("");
+}
+
+function drawNyquist(canvas, lt) {
+  var pts = [], i;
+  if (!lt.zeroGain) {
+    var ws = logspace(-2, 3, 700);
+    for (i = 0; i < ws.length; i++) pts.push(freqResp(lt.num, lt.den, ws[i]));
+  }
+  // scale: include -1 and the bulk of the curve
+  var mags = pts.map(cAbs).filter(isFinite).sort(function (a, b) { return a - b; });
+  var q = mags.length ? mags[Math.floor(mags.length * 0.92)] : 2;
+  var lim = Math.min(60, Math.max(2, q * 1.15));
+  var ax = drawAxesXY(canvas, { xlo: -lim, xhi: lim, ylo: -lim, yhi: lim, title: "Nyquist plot of L(jω)", xlabel: "Re", equal: true });
+  var ctx = ax.ctx;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(ax.M.l, ax.M.t, ax.aw, ax.ah); ctx.clip();
+  var drawBranch = function (conj) {
+    ctx.strokeStyle = COL.s1; ctx.lineWidth = 2;
+    ctx.setLineDash(conj ? [5, 4] : []);
+    ctx.beginPath();
+    var started = false;
+    for (i = 0; i < pts.length; i++) {
+      var re = pts[i][0], im = conj ? -pts[i][1] : pts[i][1];
+      if (!isFinite(re) || !isFinite(im)) { started = false; continue; }
+      var px = ax.X(re), py = ax.Y(im);
+      if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  if (pts.length) { drawBranch(false); drawBranch(true); }
+  else {
+    ctx.fillStyle = COL.ink2; ctx.font = "13px system-ui, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("Set a nonzero gain to draw L(jω).", ax.M.l + ax.aw / 2, ax.M.t + ax.ah / 2);
+  }
+  ctx.restore();
+  // critical point -1
+  ctx.strokeStyle = COL.crit; ctx.lineWidth = 2;
+  var mx = ax.X(-1), my = ax.Y(0);
+  ctx.beginPath();
+  ctx.moveTo(mx - 5, my - 5); ctx.lineTo(mx + 5, my + 5);
+  ctx.moveTo(mx - 5, my + 5); ctx.lineTo(mx + 5, my - 5);
+  ctx.stroke();
+  ctx.fillStyle = COL.crit; ctx.font = "11px system-ui, sans-serif";
+  ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+  ctx.fillText("−1", mx + 7, my - 3);
+}
+
+/* ---- main run + rendering ---- */
+function runSim() {
+  var r = readCfg();
+  if (r.err) { $("statusMsg").textContent = r.err; return; }
+  $("statusMsg").textContent = "";
+  $("dirtyMsg").textContent = "";
+  lastCfg = r.cfg;
+  lastRes = simulate(lastCfg);
+  renderAll();
+}
+
+function downloadCsv() {
+  if (!lastRes) return;
+  var res = lastRes;
+  var lines = ["t_s,theta_deg,thetadot_deg_per_s,x_m,xdot_m_per_s,F_applied_N,F_commanded_N"];
+  for (var i = 0; i < res.t.length; i++) {
+    lines.push([res.t[i].toFixed(4), deg(res.th[i]).toPrecision(8), deg(res.thd[i]).toPrecision(8),
+      res.x[i].toPrecision(8), res.xd[i].toPrecision(8),
+      res.F[i].toPrecision(8), res.Fraw[i].toPrecision(8)].join(","));
+  }
+  var blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "tune_pid_data.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function renderAll() {
+  if (!lastRes) return;
+  var res = lastRes, cfg = lastCfg;
+  var si = settlingInfo(res, cfg.theta0);
+
+  // tiles
+  var sv = $("settleVal");
+  sv.classList.remove("good", "crit");
+  if (si.diverged) {
+    sv.textContent = "unstable"; sv.classList.add("crit");
+    $("settleNote").textContent = "⚠ simulation diverged";
+  } else if (si.time == null) {
+    sv.textContent = "not settled";
+    $("settleNote").textContent = "still outside ±" + deg(si.band).toFixed(2) + "° at end of sim";
+  } else {
+    sv.textContent = si.time.toFixed(2) + " s"; sv.classList.add("good");
+    $("settleNote").textContent = "✓ band ±" + deg(si.band).toFixed(2) + "° (5% of |θ₀|)";
+  }
+  var pF = 0, i;
+  for (i = 0; i < res.Fraw.length; i++) if (isFinite(res.Fraw[i])) pF = Math.max(pF, Math.abs(res.Fraw[i]));
+  $("peakFVal").textContent = pF >= 1e4 ? pF.toExponential(1) + " N" : pF.toFixed(1) + " N";
+  $("peakFNote").textContent = (cfg.fmax != null)
+    ? "applied force clipped to ±" + cfg.fmax + " N"
+    : "no force limit active";
+
+  // time plots
+  var thDeg = res.th.map(deg), thdDeg = res.thd.map(deg);
+  linePlot($("pTh"), {
+    title: "Pole angle θ  [deg]", x: res.t,
+    series: [{ y: thDeg, color: COL.s1 }],
+    band: deg(si.band), vline: si.time,
+    tip: function (k) { return "t = " + res.t[k].toFixed(2) + " s\nθ = " + thDeg[k].toFixed(2) + "°"; }
+  });
+  linePlot($("pThd"), {
+    title: "Pole rate θ̇  [deg/s]", x: res.t,
+    series: [{ y: thdDeg, color: COL.s1 }],
+    tip: function (k) { return "t = " + res.t[k].toFixed(2) + " s\nθ̇ = " + thdDeg[k].toFixed(1) + "°/s"; }
+  });
+  linePlot($("pX"), {
+    title: "Cart position x  [m]", x: res.t,
+    series: [{ y: res.x, color: COL.s1 }],
+    tip: function (k) { return "t = " + res.t[k].toFixed(2) + " s\nx = " + res.x[k].toFixed(3) + " m"; }
+  });
+  linePlot($("pXd"), {
+    title: "Cart velocity ẋ  [m/s]", x: res.t,
+    series: [{ y: res.xd, color: COL.s1 }],
+    tip: function (k) { return "t = " + res.t[k].toFixed(2) + " s\nẋ = " + res.xd[k].toFixed(3) + " m/s"; }
+  });
+  var satOn = cfg.fmax != null;
+  linePlot($("pF"), {
+    title: "Control force F  [N]", x: res.t,
+    series: satOn
+      ? [{ y: res.Fraw, color: COL.muted, dash: true, step: true },
+         { y: res.F, color: COL.s1, step: true }]
+      : [{ y: res.F, color: COL.s1, step: true }],
+    tip: function (k) {
+      return "t = " + res.t[k].toFixed(2) + " s\napplied = " + res.F[k].toFixed(2) + " N"
+        + (satOn ? "\ncommanded = " + res.Fraw[k].toFixed(2) + " N" : "");
+    }
+  });
+
+  // animation reset
+  setPlaying(false);
+  anim.t = 0;
+  $("scrub").max = res.t.length - 1;
+  $("scrub").value = 0;
+  drawFrame(0);
+
+  // data table (rebuild if open)
+  if ($("tableDetails").open) buildTable();
+}
+
+function buildTable() {
+  if (!lastRes) return;
+  var res = lastRes;
+  var stride = Math.max(1, Math.ceil(res.t.length / 2000));
+  var h = "<table><thead><tr><th>t (s)</th><th>θ (°)</th><th>θ̇ (°/s)</th><th>x (m)</th><th>ẋ (m/s)</th><th>F (N)</th></tr></thead><tbody>";
+  for (var i = 0; i < res.t.length; i += stride) {
+    h += "<tr><td>" + res.t[i].toFixed(3) + "</td><td>" + deg(res.th[i]).toFixed(3)
+      + "</td><td>" + deg(res.thd[i]).toFixed(2) + "</td><td>" + res.x[i].toFixed(4)
+      + "</td><td>" + res.xd[i].toFixed(4) + "</td><td>" + res.F[i].toFixed(3) + "</td></tr>";
+  }
+  $("tableWrap").innerHTML = h + "</tbody></table>";
+}
+
+/* ---- wiring ---- */
+function syncGain(sl, num) {
+  $(sl).addEventListener("input", function () { $(num).value = $(sl).value; onAnyChange(); });
+  $(num).addEventListener("input", function () {
+    var v = parseFloat($(num).value);
+    if (isFinite(v)) $(sl).value = Math.max($(sl).min, Math.min($(sl).max, v));
+    onAnyChange();
+  });
+}
+
+function updateHints() {
+  var f = function (id) { var v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
+  $("th0si").textContent = "= " + rad(f("th0")).toFixed(4) + " rad";
+  $("thd0si").textContent = "= " + rad(f("thd0")).toFixed(4) + " rad/s";
+  $("kpRobot").textContent = "robot: KP = " + (f("kpN") === 0 ? "0" : "−" + f("kpN"));
+  $("kiRobot").textContent = "robot: KI = " + (f("kiN") === 0 ? "0" : "−" + f("kiN"));
+  $("kdRobot").textContent = "robot: KD = " + (f("kdN") === 0 ? "0" : "−" + f("kdN"));
+}
+
+function onAnyChange() {
+  updateHints();
+  $("classicalBody").classList.add("stale");
+  $("staleBadge").classList.add("on");
+  $("classicalCard").style.display = $("linearChk").checked ? "block" : "none";
+  if (lastRes) $("dirtyMsg").textContent = "settings changed — press Re-run to update results";
+}
+
+/* exactly one dynamics box checked at all times */
+function dynChanged(ev) {
+  var lin = $("linearChk"), non = $("nonlinChk");
+  if (ev.target === lin) non.checked = !lin.checked;
+  else lin.checked = !non.checked;
+  onAnyChange();
+}
+
+function djb2(str) {
+  var h = 5381;
+  for (var i = 0; i < str.length; i++) h = (h * 33 + str.charCodeAt(i)) >>> 0;
+  return h;
+}
+function tryUnlock() {
+  var norm = $("pwd").value.toLowerCase().replace(/\s+/g, "");
+  if (djb2(norm) === 147307626) {
+    unlocked = true;
+    document.body.classList.add("unlocked");
+    $("pwdErr").style.display = "none";
+    onAnyChange();
+  } else {
+    $("pwdErr").style.display = "block";
+  }
+}
+
+function resetDefaults() {
+  $("th0").value = 10; $("thd0").value = 0;
+  $("dt").value = 0.02; $("simT").value = 5;
+  $("linearChk").checked = true; $("nonlinChk").checked = false;
+  $("kp").value = 0; $("kpN").value = 0;
+  $("ki").value = 0; $("kiN").value = 0;
+  $("kd").value = 0; $("kdN").value = 0;
+  $("satChk").checked = true; $("fmax").value = 30; $("ctrlInt").value = 0.05;
+  onAnyChange();
+  runSim();
+}
+
+(function init() {
+  syncGain("kp", "kpN"); syncGain("ki", "kiN"); syncGain("kd", "kdN");
+  ["th0", "thd0", "dt", "simT", "fmax", "ctrlInt"].forEach(function (id) {
+    $(id).addEventListener("input", onAnyChange);
+  });
+  $("satChk").addEventListener("change", onAnyChange);
+  $("linearChk").addEventListener("change", dynChanged);
+  $("nonlinChk").addEventListener("change", dynChanged);
+  $("runBtn").addEventListener("click", runSim);
+  $("resetBtn").addEventListener("click", resetDefaults);
+  $("csvBtn").addEventListener("click", downloadCsv);
+  $("unlockBtn").addEventListener("click", tryUnlock);
+  $("pwd").addEventListener("keydown", function (e) { if (e.key === "Enter") tryUnlock(); });
+  $("classicalBtn").addEventListener("click", updateClassical);
+  $("playBtn").addEventListener("click", function () {
+    if (!lastRes) return;
+    if (!anim.playing && anim.t >= lastRes.t[lastRes.t.length - 1] - 1e-9) anim.t = 0;
+    setPlaying(!anim.playing);
+  });
+  $("scrub").addEventListener("input", function () {
+    if (!lastRes) return;
+    anim.t = lastRes.t[Math.min(lastRes.t.length - 1, parseInt($("scrub").value, 10))];
+    drawFrame(anim.t);
+  });
+  $("tableDetails").addEventListener("toggle", function () {
+    if ($("tableDetails").open) buildTable();
+  });
+  ["pTh", "pThd", "pX", "pXd", "pF"].forEach(function (id) { attachHover($(id)); });
+
+  var rsz = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(rsz);
+    rsz = setTimeout(function () {
+      if (lastRes) { renderAll(); }
+      if ($("classicalBody").style.display !== "none" && !$("classicalBody").classList.contains("stale")) updateClassical();
+    }, 120);
+  });
+
+  updateHints();
+  runSim();
+})();
+</script>
+</body>
+</html>
